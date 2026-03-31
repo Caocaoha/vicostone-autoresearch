@@ -32,8 +32,8 @@ class GeminiSentimentAnalyzer:
     Package: google-genai (NEW SDK - NOT deprecated)
     """
     
-    # Available models: gemini-2.0-flash-exp, gemini-1.5-flash, gemini-2.5-flash, etc.
-    DEFAULT_MODEL = "gemini-2.0-flash-exp"
+    # Available models: gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash-exp
+    DEFAULT_MODEL = "gemini-2.5-flash"
     
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY', '')
