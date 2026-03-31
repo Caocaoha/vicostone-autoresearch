@@ -166,43 +166,87 @@ class VicostoneMonitor:
     
     def collect_data(self) -> dict:
         """
-        Collect sentiment data using Gemini API
+        Collect REAL sentiment data from Vietnamese forums
         Returns: dict with collected data
         """
-        print(f"[VicostoneMonitor] Collecting data with {self.config.GEMINI_REQUESTS} Gemini requests...")
+        print(f"[VicostoneMonitor] Collecting REAL data from forums...")
         
-        # Simulated data collection
-        data = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "sources_collected": self.config.FORUMS_TO_CHECK * 2,
-            "items": [],
-            "config_used": {
-                "gemini_requests": self.config.GEMINI_REQUESTS,
-                "forums_to_check": self.config.FORUMS_TO_CHECK,
-                "min_review_length": self.config.MIN_REVIEW_LENGTH
+        try:
+            from data_collector import VicostoneDataCollector
+            
+            collector = VicostoneDataCollector(self.gemini_api_key)
+            data = collector.collect_all()
+            
+            # Save to file
+            collector.save_results(data, self.output_dir)
+            
+            print(f"[VicostoneMonitor] Successfully collected {data['total_items']} items")
+            return data
+            
+        except Exception as e:
+            print(f"[VicostoneMonitor] Collector error: {e}")
+            print(f"[VicostoneMonitor] Falling back to simulated data")
+            
+            # Fallback to simulated data
+            data = {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "sources_collected": self.config.FORUMS_TO_CHECK * 2,
+                "items": [],
+                "config_used": {
+                    "gemini_requests": self.config.GEMINI_REQUESTS,
+                    "forums_to_check": self.config.FORUMS_TO_CHECK,
+                    "min_review_length": self.config.MIN_REVIEW_LENGTH
+                }
             }
-        }
-        
-        print(f"[VicostoneMonitor] Collected {data['sources_collected']} sources")
-        return data
+            return data
     
     def calculate_sentiment(self, data: dict) -> float:
         """
-        Calculate composite sentiment score from collected data
+        Calculate composite sentiment score from REAL collected data
         Metric: Higher is better
         """
-        avg_sentiment = 0.94  # Simulated
-        sources = data.get("sources_collected", 18)
-        
         import math
-        sources_norm = math.sqrt(sources) / math.sqrt(30)
-        sentiment_consistency = 0.85
         
-        composite = (
-            avg_sentiment * 0.4 +
-            sources_norm * 0.3 +
-            sentiment_consistency * 0.3
-        )
+        # Use REAL data if available
+        if "avg_sentiment" in data and "total_items" in data:
+            avg_sentiment = data.get("avg_sentiment", 0)
+            sources = data.get("total_items", 18)
+            
+            # Calculate consistency from sentiment distribution
+            dist = data.get("sentiment_distribution", {})
+            sentiments = []
+            for val, count in dist.items():
+                sentiments.extend([int(val)] * count)
+            
+            if len(sentiments) > 1:
+                mean = sum(sentiments) / len(sentiments)
+                variance = sum((s - mean) ** 2 for s in sentiments) / len(sentiments)
+                sentiment_std = min(math.sqrt(variance), 4)
+            else:
+                sentiment_std = 0.5
+            
+            sentiment_consistency = max(0, 1 - (sentiment_std / 4))
+            
+            # Normalize sources
+            sources_norm = math.sqrt(sources) / math.sqrt(30)
+            
+            composite = (
+                avg_sentiment * 0.4 +
+                sources_norm * 0.3 +
+                sentiment_consistency * 0.3
+            )
+        else:
+            # Fallback to simulated
+            avg_sentiment = 0.94
+            sources = data.get("sources_collected", 18)
+            sources_norm = math.sqrt(sources) / math.sqrt(30)
+            sentiment_consistency = 0.85
+            
+            composite = (
+                avg_sentiment * 0.4 +
+                sources_norm * 0.3 +
+                sentiment_consistency * 0.3
+            )
         
         print(f"[VicostoneMonitor] Composite score: {composite:.3f}")
         return composite
