@@ -2,6 +2,7 @@
 Vicostone Sentiment Monitor — AutoResearch Module
 GPU: NVIDIA T4 16GB (Google Colab)
 API: Google Gemini (FREE - 60 req/min)
+Package: google.genai (new, not deprecated)
 Metric: composite_sentiment_score
 """
 
@@ -12,22 +13,30 @@ from datetime import datetime
 from pathlib import Path
 
 # ===========================
-# GEMINI API INTEGRATION
+# GEMINI API INTEGRATION (NEW PACKAGE)
 # ===========================
 
-import google.generativeai as gemini
+try:
+    from google import genai
+    from google.genai import Client
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    print("Warning: google.genai not installed. Using fallback.")
+
 
 class GeminiSentimentAnalyzer:
     """
     Sentiment analysis using Gemini API
     FREE TIER: 60 requests/minute
+    Package: google.genai (NOT deprecated)
     """
     
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY', '')
-        if self.api_key:
-            gemini.configure(api_key=self.api_key)
-        self.model = gemini.GenerativeModel('gemini-1.5-flash')
+        self.client = None
+        if self.api_key and GEMINI_AVAILABLE:
+            self.client = genai.Client(api_key=self.api_key)
     
     def analyze_sentiment(self, text: str) -> int:
         """
@@ -41,7 +50,7 @@ class GeminiSentimentAnalyzer:
         +1 = Tích cực
         +2 = Rất tích cực
         """
-        if not self.api_key:
+        if not self.client:
             return 0  # Fallback if no API key
         
         prompt = f"""Analyze the sentiment of this text about Vicostone quartz products.
@@ -59,13 +68,16 @@ Text: {text[:500]}
 Number:"""
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt
+            )
             result = response.text.strip()
             
             # Parse result
             if result in ['-2', '-1', '0', '1', '2']:
                 return int(result)
-            elif result.startswith('-'):
+            elif result.startswith('-') and len(result) <= 3:
                 return -1
             elif result.startswith('+'):
                 return 1
@@ -78,10 +90,7 @@ Number:"""
             return 0
     
     def batch_analyze(self, texts: list) -> list:
-        """
-        Batch analyze multiple texts
-        More efficient than individual calls
-        """
+        """Batch analyze multiple texts"""
         sentiments = []
         for text in texts:
             sentiment = self.analyze_sentiment(text)
