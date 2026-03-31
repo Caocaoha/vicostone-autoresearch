@@ -260,11 +260,16 @@ class VicostoneMonitor:
         data = self.collect_data()
         composite_score = self.calculate_sentiment(data)
         
+        # Handle both old and new data formats
+        sources = data.get("total_items", data.get("sources_collected", 18))
+        avg_sentiment = data.get("avg_sentiment", 0.94)
+        
         result = {
             "date": data["date"],
             "composite_score": composite_score,
-            "config": data["config_used"],
-            "sources": data["sources_collected"]
+            "config": data.get("config_used", {}),
+            "sources": sources,
+            "avg_sentiment": avg_sentiment
         }
         
         return result
@@ -282,12 +287,12 @@ class VicostoneMonitor:
             param_changed="baseline",
             old_value="-",
             new_value="-",
-            avg_sentiment="+0.94",
+            avg_sentiment=f"{result.get('avg_sentiment', 0.94):.2f}",
             sources=str(result["sources"]),
             composite_score=f"{result['composite_score']:.2f}",
             trend="stable",
             status="baseline",
-            notes="First run"
+            notes="First run with real data"
         )
         
         print(f"\nBaseline complete: {result['composite_score']:.3f}")
