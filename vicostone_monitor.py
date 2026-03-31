@@ -267,7 +267,11 @@ class VicostoneMonitor:
         result = {
             "date": data["date"],
             "composite_score": composite_score,
-            "config": data.get("config_used", {}),
+            "config": data.get("config_used", {
+                "gemini_requests": self.config.GEMINI_REQUESTS,
+                "forums_to_check": self.config.FORUMS_TO_CHECK,
+                "min_review_length": self.config.MIN_REVIEW_LENGTH
+            }),
             "sources": sources,
             "avg_sentiment": avg_sentiment
         }
