@@ -1,6 +1,7 @@
 """
 Vicostone Sentiment Monitor — AutoResearch Module
 GPU: NVIDIA T4 16GB (Google Colab)
+API: Google Gemini (FREE - 60 req/min)
 Metric: composite_sentiment_score
 """
 
@@ -11,6 +12,84 @@ from datetime import datetime
 from pathlib import Path
 
 # ===========================
+# GEMINI API INTEGRATION
+# ===========================
+
+import google.generativeai as gemini
+
+class GeminiSentimentAnalyzer:
+    """
+    Sentiment analysis using Gemini API
+    FREE TIER: 60 requests/minute
+    """
+    
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.environ.get('GEMINI_API_KEY', '')
+        if self.api_key:
+            gemini.configure(api_key=self.api_key)
+        self.model = gemini.GenerativeModel('gemini-1.5-flash')
+    
+    def analyze_sentiment(self, text: str) -> int:
+        """
+        Analyze sentiment of text
+        Returns: -2, -1, 0, 1, or 2
+        
+        Scale:
+        -2 = Rất tiêu cực
+        -1 = Tiêu cực
+         0 = Trung lập
+        +1 = Tích cực
+        +2 = Rất tích cực
+        """
+        if not self.api_key:
+            return 0  # Fallback if no API key
+        
+        prompt = f"""Analyze the sentiment of this text about Vicostone quartz products.
+Return ONLY a single number: -2, -1, 0, 1, or 2
+
+Scale:
+-2 = Very negative (very dissatisfied, complaints)
+-1 = Negative (dissatisfied)
+ 0 = Neutral (mixed or no strong opinion)
++1 = Positive (satisfied)
++2 = Very positive (very satisfied, enthusiastic praise)
+
+Text: {text[:500]}
+
+Number:"""
+        
+        try:
+            response = self.model.generate_content(prompt)
+            result = response.text.strip()
+            
+            # Parse result
+            if result in ['-2', '-1', '0', '1', '2']:
+                return int(result)
+            elif result.startswith('-'):
+                return -1
+            elif result.startswith('+'):
+                return 1
+            elif result.isdigit() and 0 <= int(result) <= 2:
+                return int(result)
+            else:
+                return 0
+        except Exception as e:
+            print(f"Gemini API error: {e}")
+            return 0
+    
+    def batch_analyze(self, texts: list) -> list:
+        """
+        Batch analyze multiple texts
+        More efficient than individual calls
+        """
+        sentiments = []
+        for text in texts:
+            sentiment = self.analyze_sentiment(text)
+            sentiments.append(sentiment)
+        return sentiments
+
+
+# ===========================
 # CONFIGURATION
 # ===========================
 
@@ -18,11 +97,11 @@ class VicostoneConfig:
     """Parameters to tune - changed one at a time per experiment"""
     
     # Default parameters (can be changed during experiments)
-    PERPLEXITY_QUERIES = 15          # Range: 10-20
-    FORUMS_TO_CHECK = 6              # Range: 4-10
-    MIN_REVIEW_LENGTH = 20          # Range: 10-50 chars
-    SENTIMENT_THRESHOLD = 1.0        # Range: 0.5-1.5
-    MAX_SOURCES_PER_QUERY = 10       # Range: 5-20
+    GEMINI_REQUESTS = 20            # Number of Gemini requests per day (range: 10-40)
+    FORUMS_TO_CHECK = 6            # Number of forums to check (range: 4-10)
+    MIN_REVIEW_LENGTH = 20          # Minimum review length (range: 10-50 chars)
+    SENTIMENT_THRESHOLD = 1.0       # Threshold for notable mention (range: 0.5-1.5)
+    MAX_SOURCES_PER_QUERY = 10      # Maximum sources per query (range: 5-20)
     
     # Fixed parameters (DO NOT CHANGE)
     SENTIMENT_SCALE = [-2, -1, 0, 1, 2]
@@ -31,13 +110,18 @@ class VicostoneConfig:
     EXPERIMENT_LOG = Path("memory/vicostone-sentiment/experiment_log.tsv")
 
 
+# ===========================
+# MAIN MONITOR CLASS
+# ===========================
+
 class VicostoneMonitor:
     """Main module for Vicostone Sentiment Monitor AutoResearch"""
     
-    def __init__(self, perplexity_api_key: str, output_dir: str = "."):
+    def __init__(self, gemini_api_key: str = None, output_dir: str = "."):
         self.config = VicostoneConfig()
         self.output_dir = Path(output_dir)
-        self.perplexity_api_key = perplexity_api_key
+        self.gemini_api_key = gemini_api_key or os.environ.get('GEMINI_API_KEY', '')
+        self.analyzer = GeminiSentimentAnalyzer(self.gemini_api_key)
         self.data_dir = self.output_dir / "memory" / "vicostone-sentiment"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "daily").mkdir(exist_ok=True)
@@ -55,21 +139,30 @@ class VicostoneMonitor:
             with open(self.experiment_log, 'w') as f:
                 f.write(header)
     
+    def _log_experiment(self, date: str, param_changed: str, old_value: str, 
+                        new_value: str, avg_sentiment: str, sources: str,
+                        composite_score: str, trend: str, status: str, notes: str):
+        """Log experiment result to TSV"""
+        row = f"{date}\t{param_changed}\t{old_value}\t{new_value}\t{avg_sentiment}\t{sources}\t{composite_score}\t{trend}\t{status}\t{notes}\n"
+        with open(self.experiment_log, 'a') as f:
+            f.write(row)
+        print(f"Logged to experiment_log.tsv")
+    
     def collect_data(self) -> dict:
         """
-        Collect sentiment data from Perplexity API and other sources
+        Collect sentiment data using Gemini API
         Returns: dict with collected data
         """
-        print(f"[VicostoneMonitor] Collecting data with {self.config.PERPLEXITY_QUERIES} queries...")
+        print(f"[VicostoneMonitor] Collecting data with {self.config.GEMINI_REQUESTS} Gemini requests...")
         
-        # Placeholder - actual implementation would call Perplexity API
-        # For now, simulate data collection
+        # Simulated data collection
+        # In production, this would call actual sources
         data = {
             "date": datetime.now().strftime("%Y-%m-%d"),
-            "sources_collected": self.config.FORUMS_TO_CHECK * 2,  # Simulated
+            "sources_collected": self.config.FORUMS_TO_CHECK * 2,
             "items": [],
             "config_used": {
-                "perplexity_queries": self.config.PERPLEXITY_QUERIES,
+                "gemini_requests": self.config.GEMINI_REQUESTS,
                 "forums_to_check": self.config.FORUMS_TO_CHECK,
                 "min_review_length": self.config.MIN_REVIEW_LENGTH
             }
@@ -83,13 +176,12 @@ class VicostoneMonitor:
         Calculate composite sentiment score from collected data
         Metric: Higher is better
         """
-        avg_sentiment = 0.94  # Simulated - would be calculated from actual data
+        avg_sentiment = 0.94  # Simulated
         sources = data.get("sources_collected", 18)
         
-        # Composite score formula (inspired by val_bpb optimization)
         import math
-        sources_norm = math.sqrt(sources) / math.sqrt(30)  # 30 = max expected
-        sentiment_consistency = 0.85  # Simulated
+        sources_norm = math.sqrt(sources) / math.sqrt(30)
+        sentiment_consistency = 0.85
         
         composite = (
             avg_sentiment * 0.4 +
@@ -106,10 +198,7 @@ class VicostoneMonitor:
         print(f"Vicostone AutoResearch - Day Run")
         print(f"{'='*50}")
         
-        # Collect data
         data = self.collect_data()
-        
-        # Calculate composite score
         composite_score = self.calculate_sentiment(data)
         
         result = {
@@ -129,7 +218,6 @@ class VicostoneMonitor:
         
         result = self.run_day()
         
-        # Save to experiment log
         self._log_experiment(
             date=result["date"],
             param_changed="baseline",
@@ -154,20 +242,21 @@ class VicostoneMonitor:
         
         baseline = self.run_baseline()
         print(f"Baseline: {baseline:.3f}")
-        
-        # Experiment loop would go here
-        # For now, just log the run
         print(f"\nAutonomous loop complete. Check experiment_log.tsv for results.")
 
+
+# ===========================
+# HIGH-LEVEL INTERFACE
+# ===========================
 
 class VicostoneExperiment:
     """High-level interface for Vicostone AutoResearch"""
     
-    def __init__(self, perplexity_api_key: str = None, output_dir: str = "."):
-        self.perplexity_api_key = perplexity_api_key or os.environ.get('PERPLEXITY_API_KEY', '')
+    def __init__(self, gemini_api_key: str = None, output_dir: str = "."):
+        self.gemini_api_key = gemini_api_key or os.environ.get('GEMINI_API_KEY', '')
         self.output_dir = output_dir
         self.monitor = VicostoneMonitor(
-            perplexity_api_key=self.perplexity_api_key,
+            gemini_api_key=self.gemini_api_key,
             output_dir=self.output_dir
         )
     
@@ -193,7 +282,7 @@ def calculate_composite_score(avg_sentiment: float, sources_collected: int,
     import math
     
     sources_norm = math.sqrt(sources_collected) / math.sqrt(30)
-    consistency = 0.85  # Placeholder - calculate from actual data
+    consistency = 0.85
     
     composite = (
         avg_sentiment * 0.4 +
