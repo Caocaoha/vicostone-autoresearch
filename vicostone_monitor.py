@@ -2,7 +2,7 @@
 Vicostone Sentiment Monitor — AutoResearch Module
 GPU: NVIDIA T4 16GB (Google Colab)
 API: Google Gemini (FREE - 60 req/min)
-Package: google.genai (new, not deprecated)
+Package: google-genai (googleapis/python-genai)
 Metric: composite_sentiment_score
 """
 
@@ -13,12 +13,12 @@ from datetime import datetime
 from pathlib import Path
 
 # ===========================
-# GEMINI API INTEGRATION (NEW PACKAGE)
+# GEMINI API INTEGRATION (NEW SDK)
 # ===========================
 
 try:
     from google import genai
-    from google.genai import Client
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -29,14 +29,19 @@ class GeminiSentimentAnalyzer:
     """
     Sentiment analysis using Gemini API
     FREE TIER: 60 requests/minute
-    Package: google.genai (NOT deprecated)
+    Package: google-genai (NEW SDK - NOT deprecated)
     """
+    
+    # Available models: gemini-2.0-flash-exp, gemini-1.5-flash, gemini-2.5-flash, etc.
+    DEFAULT_MODEL = "gemini-2.0-flash-exp"
     
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY', '')
         self.client = None
         if self.api_key and GEMINI_AVAILABLE:
             self.client = genai.Client(api_key=self.api_key)
+        elif not GEMINI_AVAILABLE:
+            print("Warning: google.genai not available")
     
     def analyze_sentiment(self, text: str) -> int:
         """
@@ -51,7 +56,8 @@ class GeminiSentimentAnalyzer:
         +2 = Rất tích cực
         """
         if not self.client:
-            return 0  # Fallback if no API key
+            print("Warning: No Gemini client, returning 0")
+            return 0
         
         prompt = f"""Analyze the sentiment of this text about Vicostone quartz products.
 Return ONLY a single number: -2, -1, 0, 1, or 2
@@ -69,7 +75,7 @@ Number:"""
         
         try:
             response = self.client.models.generate_content(
-                model="gemini-1.5-flash-001",
+                model=self.DEFAULT_MODEL,
                 contents=prompt
             )
             result = response.text.strip()
@@ -84,6 +90,7 @@ Number:"""
             elif result.isdigit() and 0 <= int(result) <= 2:
                 return int(result)
             else:
+                print(f"Unexpected response: {result}")
                 return 0
         except Exception as e:
             print(f"Gemini API error: {e}")
@@ -165,7 +172,6 @@ class VicostoneMonitor:
         print(f"[VicostoneMonitor] Collecting data with {self.config.GEMINI_REQUESTS} Gemini requests...")
         
         # Simulated data collection
-        # In production, this would call actual sources
         data = {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "sources_collected": self.config.FORUMS_TO_CHECK * 2,
