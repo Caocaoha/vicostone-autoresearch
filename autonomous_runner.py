@@ -157,7 +157,15 @@ class AutonomousRunner:
         self.param_names = list(PARAM_SEARCH_SPACE.keys())
         self.experiment_count = 0
         
-        # Setup paths
+        # Setup paths - VERIFY BEFORE CHANGING
+        if not Path(OUTPUT_DIR).exists():
+            raise FileNotFoundError(f"❌ OUTPUT_DIR does not exist: {OUTPUT_DIR}\n"
+                                    f"   Please mount Google Drive first or check path.")
+        
+        # Verify we're in the right place
+        log_to_file(f"📁 Working directory: {OUTPUT_DIR}")
+        log_to_file(f"📁 Contents: {os.listdir(OUTPUT_DIR)[:5]}...")
+        
         os.chdir(OUTPUT_DIR)
         sys.path.insert(0, OUTPUT_DIR)
         
@@ -338,6 +346,36 @@ class AutonomousRunner:
 # MAIN
 # ===========================
 
+def verify_environment():
+    """Verify environment before running"""
+    print("\n🔍 VERIFYING ENVIRONMENT...")
+    
+    # Check OUTPUT_DIR
+    if not Path(OUTPUT_DIR).exists():
+        print(f"❌ ERROR: OUTPUT_DIR does not exist: {OUTPUT_DIR}")
+        print("   Run this FIRST to mount Google Drive:")
+        print("   >>> from google.colab import drive")
+        print("   >>> drive.mount('/content/drive')")
+        return False
+    
+    print(f"✅ OUTPUT_DIR exists: {OUTPUT_DIR}")
+    
+    # Check if it's a git repo
+    if not Path(OUTPUT_DIR, '.git').exists():
+        print(f"⚠️ WARNING: {OUTPUT_DIR} is not a git repo - git operations will fail")
+    else:
+        print(f"✅ Git repo verified")
+    
+    # Check Python path
+    if Path(OUTPUT_DIR, 'vicostone_monitor.py').exists():
+        print(f"✅ vicostone_monitor.py found")
+    else:
+        print(f"❌ WARNING: vicostone_monitor.py not found in {OUTPUT_DIR}")
+    
+    print("\n" + "=" * 50)
+    return True
+
+
 if __name__ == "__main__":
     print("""
 ╔══════════════════════════════════════════════════════════════╗
@@ -348,6 +386,11 @@ if __name__ == "__main__":
 ║     Press Ctrl+C to stop                                    ║
 ╚══════════════════════════════════════════════════════════════╝
     """)
+    
+    # Verify environment FIRST
+    if not verify_environment():
+        print("\n❌ Environment verification failed. Fix errors above and try again.")
+        exit(1)
     
     runner = AutonomousRunner()
     

@@ -305,6 +305,12 @@ class VicostoneDataCollector:
             "sentiment_distribution": sentiment_dist,
             "sources": list(self.collectors.keys()),
             "items": all_items,
+            # Track config used for reproducibility
+            "config_used": {
+                "keywords_count": len(self.KEYWORDS),
+                "collectors_active": list(self.collectors.keys()),
+                "collection_time": datetime.now().isoformat(),
+            },
         }
         
         print(f"\n📊 Collection Summary:")
@@ -319,14 +325,30 @@ class VicostoneDataCollector:
         output_dir = Path(output_dir)
         date_str = datetime.now().strftime("%Y-%m-%d")
         
-        # Save daily data
+        # Verify output_dir exists and is absolute
+        if not output_dir.is_absolute():
+            print(f"⚠️ Warning: output_dir is relative: {output_dir}")
+            output_dir = Path.cwd() / output_dir
+        
+        # Create full path
         daily_file = output_dir / "memory" / "vicostone-sentiment" / "daily" / f"{date_str}.json"
         daily_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Verify parent directory exists
+        if not daily_file.parent.exists():
+            print(f"❌ ERROR: Cannot create directory: {daily_file.parent}")
+            raise Exception(f"Cannot create directory: {daily_file.parent}")
         
         with open(daily_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
-        print(f"✅ Saved to {daily_file}")
+        # Verify file was saved
+        if daily_file.exists():
+            print(f"✅ SAVED: {daily_file}")
+            print(f"   File size: {daily_file.stat().st_size} bytes")
+        else:
+            print(f"❌ ERROR: File was not saved!")
+        
         return daily_file
 
 

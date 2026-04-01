@@ -177,14 +177,19 @@ class VicostoneMonitor:
             collector = VicostoneDataCollector(self.gemini_api_key)
             data = collector.collect_all()
             
-            # Save to file
-            collector.save_results(data, self.output_dir)
+            # ALWAYS save to file first - verify save worked
+            saved_path = collector.save_results(data, self.output_dir)
+            if saved_path and saved_path.exists():
+                print(f"[VicostoneMonitor] ✅ Saved {data['total_items']} items to {saved_path}")
+            else:
+                print(f"[VicostoneMonitor] ⚠️ Save failed - data not persisted!")
             
-            print(f"[VicostoneMonitor] Successfully collected {data['total_items']} items")
             return data
             
         except Exception as e:
-            print(f"[VicostoneMonitor] Collector error: {e}")
+            print(f"[VicostoneMonitor] ❌ Collector error: {e}")
+            import traceback
+            traceback.print_exc()
             print(f"[VicostoneMonitor] Falling back to simulated data")
             
             # Fallback to simulated data
