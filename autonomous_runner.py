@@ -11,6 +11,9 @@ Nguyên lý:
    Nếu WORSE → git revert
 6. Lặp lại
 
+*** CHECKPOINT/RESUME SUPPORT ***
+- Save state after each experiment
+- Resume from where left off after disconnect
 Chạy: python autonomous_runner.py
 """
 
@@ -53,6 +56,43 @@ PARAM_SEARCH_SPACE = {
         "priority": "low"
     }
 }
+
+# ===========================
+# CHECKPOINT MANAGEMENT
+# ===========================
+
+CHECKPOINT_FILE = Path(OUTPUT_DIR) / "memory" / "vicostone-sentiment" / "checkpoint.json"
+
+def save_checkpoint(state: dict):
+    """Save checkpoint state to JSON file"""
+    CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    
+    state["saved_at"] = datetime.now().isoformat()
+    
+    with open(CHECKPOINT_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
+    
+    print(f"💾 CHECKPOINT SAVED: Day {state.get('day', 0)}, Score: {state.get('best_score', 'N/A')}")
+    print(f"   File: {CHECKPOINT_FILE}")
+
+def load_checkpoint() -> dict:
+    """Load checkpoint state from JSON file"""
+    if CHECKPOINT_FILE.exists():
+        with open(CHECKPOINT_FILE, 'r') as f:
+            state = json.load(f)
+        print(f"\n📂 CHECKPOINT FOUND!")
+        print(f"   Day: {state.get('day', 0)}")
+        print(f"   Best Score: {state.get('best_score', 'N/A')}")
+        print(f"   Saved at: {state.get('saved_at', 'unknown')}")
+        print(f"   Saved: {CHECKPOINT_FILE}")
+        return state
+    return None
+
+def clear_checkpoint():
+    """Clear checkpoint file"""
+    if CHECKPOINT_FILE.exists():
+        CHECKPOINT_FILE.unlink()
+        print(f"🗑️ Checkpoint cleared")
 
 # ===========================
 # UTILITY FUNCTIONS
@@ -140,14 +180,7 @@ def log_to_file(message: str):
 
 class AutonomousRunner:
     """
-    TRUE AUTONOMOUS RUNNER
-    Mỗi vòng lặp:
-    1. Chọn parameter tiếp theo
-    2. Thay đổi giá trị
-    3. Commit
-    4. Chạy experiment
-    5. Evaluate
-    6. Keep hoặc Revert
+    TRUE AUTONOMOUS RUNNER with CHECKPOINT/RESUME
     """
     
     def __init__(self):
@@ -156,15 +189,13 @@ class AutonomousRunner:
         self.current_param_idx = 0
         self.param_names = list(PARAM_SEARCH_SPACE.keys())
         self.experiment_count = 0
+        self.best_score = None
+        self.best_commit = None
         
         # Setup paths - VERIFY BEFORE CHANGING
         if not Path(OUTPUT_DIR).exists():
             raise FileNotFoundError(f"❌ OUTPUT_DIR does not exist: {OUTPUT_DIR}\n"
                                     f"   Please mount Google Drive first or check path.")
-        
-        # Verify we're in the right place
-        log_to_file(f"📁 Working directory: {OUTPUT_DIR}")
-        log_to_file(f"📁 Contents: {os.listdir(OUTPUT_DIR)[:5]}...")
         
         os.chdir(OUTPUT_DIR)
         sys.path.insert(0, OUTPUT_DIR)
@@ -172,6 +203,37 @@ class AutonomousRunner:
         log_to_file("=" * 60)
         log_to_file("VICOSTONE AUTONOMOUS AUTORESEARCH")
         log_to_file("=" * 60)
+    
+    def load_state(self, checkpoint: dict):
+        """Load state from checkpoint"""
+        self.day = checkpoint.get('day', 0)
+        self.best_score = checkpoint.get('best_score')
+        self.current_param_idx = checkpoint.get('current_param_idx', 0)
+        self.experiment_count = checkpoint.get('experiment_count', 0)
+        self.best_commit = checkpoint.get('best_commit')
+        
+        # Restore PARAM_SEARCH_SPACE current values
+        for param_name, state in checkpoint.get('param_states', {}).items():
+            if param_name in PARAM_SEARCH_SPACE:
+                PARAM_SEARCH_SPACE[param_name]['current'] = state['current']
+        
+        log_to_file(f"📂 State restored from checkpoint")
+    
+    def get_checkpoint_state(self) -> dict:
+        """Get current state as dict for checkpoint"""
+        param_states = {}
+        for name, info in PARAM_SEARCH_SPACE.items():
+            param_states[name] = {'current': info['current']}
+        
+        return {
+            'day': self.day,
+            'best_score': self.best_score,
+            'current_param_idx': self.current_param_idx,
+            'experiment_count': self.experiment_count,
+            'best_commit': self.best_commit,
+            'param_states': param_states,
+            'total_days_planned': 7,  # Could make this configurable
+        }
     
     def get_next_parameter(self) -> tuple:
         """Get next parameter to experiment"""
@@ -244,33 +306,48 @@ class AutonomousRunner:
         
         return improved
     
-    def run_autonomous_loop(self, num_days: int = 7):
+    def run_autonomous_loop(self, num_days: int = 7, resume: bool = True):
         """
-        MAIN AUTONOMOUS LOOP
-        Chạy N ngày tự động
+        MAIN AUTONOMOUS LOOP with CHECKPOINT/RESUME
         """
-        log_to_file(f"\n🚀 STARTING AUTONOMOUS LOOP: {num_days} days")
-        log_to_file(f"Parameters: {self.param_names}")
+        # Check for checkpoint
+        checkpoint = load_checkpoint()
         
-        # Step 1: Run baseline
-        log_to_file("\n" + "=" * 40)
-        log_to_file("PHASE 1: BASELINE")
-        log_to_file("=" * 40)
-        
-        self.day = 0
-        self.baseline_score = self.run_experiment_day()
-        log_to_file(f"✅ Baseline Score: {self.baseline_score:.4f}")
-        
-        # Save baseline as starting point
-        best_score = self.baseline_score
-        best_commit = self.get_git_commit_hash()
+        if checkpoint and resume:
+            self.load_state(checkpoint)
+            
+            # Check if already complete
+            if self.day >= num_days:
+                log_to_file(f"\n🎉 Already completed {self.day} days!")
+                return self.best_score
+            
+            log_to_file(f"\n🚀 RESUMING from Day {self.day + 1}/{num_days}")
+        else:
+            # Start fresh
+            log_to_file(f"\n🚀 STARTING AUTONOMOUS LOOP: {num_days} days")
+            log_to_file(f"Parameters: {self.param_names}")
+            
+            # Step 1: Run baseline
+            log_to_file("\n" + "=" * 40)
+            log_to_file("PHASE 1: BASELINE")
+            log_to_file("=" * 40)
+            
+            self.day = 0
+            self.baseline_score = self.run_experiment_day()
+            log_to_file(f"✅ Baseline Score: {self.baseline_score:.4f}")
+            
+            self.best_score = self.baseline_score
+            self.best_commit = self.get_git_commit_hash()
+            
+            # Save initial checkpoint
+            save_checkpoint(self.get_checkpoint_state())
         
         # Step 2: Autonomous experiments
         log_to_file("\n" + "=" * 40)
         log_to_file("PHASE 2: AUTONOMOUS EXPERIMENTS")
         log_to_file("=" * 40)
         
-        for day in range(1, num_days + 1):
+        for day in range(self.day + 1, num_days + 1):
             self.day = day
             
             # Get next parameter to change
@@ -292,13 +369,13 @@ class AutonomousRunner:
             experiment_score = self.run_experiment_day()
             
             # Evaluate
-            improved = self.evaluate_and_decide(experiment_score, best_score)
+            improved = self.evaluate_and_decide(experiment_score, self.best_score)
             
             if improved:
                 # Keep this change
                 log_to_file(f"✅ Keeping change - New best: {experiment_score:.4f}")
-                best_score = experiment_score
-                best_commit = self.get_git_commit_hash()
+                self.best_score = experiment_score
+                self.best_commit = self.get_git_commit_hash()
                 
                 # Push to remote
                 git_push()
@@ -311,9 +388,11 @@ class AutonomousRunner:
             
             self.experiment_count += 1
             
-            # Checkpoint
+            # *** SAVE CHECKPOINT AFTER EACH EXPERIMENT ***
+            save_checkpoint(self.get_checkpoint_state())
+            
             log_to_file(f"\n📁 Checkpoint: Day {day} complete")
-            log_to_file(f"   Best score so far: {best_score:.4f}")
+            log_to_file(f"   Best score so far: {self.best_score:.4f}")
             log_to_file(f"   Experiments run: {self.experiment_count}")
         
         # Final summary
@@ -322,11 +401,15 @@ class AutonomousRunner:
         log_to_file("=" * 60)
         log_to_file(f"Total days: {num_days}")
         log_to_file(f"Total experiments: {self.experiment_count}")
-        log_to_file(f"Final best score: {best_score:.4f}")
-        log_to_file(f"Best commit: {best_commit}")
+        log_to_file(f"Final best score: {self.best_score:.4f}")
+        log_to_file(f"Best commit: {self.best_commit}")
+        
+        # *** CLEAR CHECKPOINT ON COMPLETE ***
+        clear_checkpoint()
+        
         log_to_file("\n🎉 AutoResearch complete! Check logs for details.")
         
-        return best_score
+        return self.best_score
     
     def get_git_commit_hash(self) -> str:
         """Get current git commit hash"""
@@ -380,9 +463,12 @@ if __name__ == "__main__":
     print("""
 ╔══════════════════════════════════════════════════════════════╗
 ║     VICOSTONE AUTONOMOUS AUTORESEARCH                       ║
-║     Inspired by Karpathy's AutoResearch                     ║
+║     WITH CHECKPOINT/RESUME SUPPORT                           ║
 ║                                                              ║
-║     Starting autonomous loop...                              ║
+║     - Auto-save after each experiment                       ║
+║     - Resume from where left off                             ║
+║     - Safe to disconnect/reconnect                           ║
+║                                                              ║
 ║     Press Ctrl+C to stop                                    ║
 ╚══════════════════════════════════════════════════════════════╝
     """)
@@ -395,8 +481,8 @@ if __name__ == "__main__":
     runner = AutonomousRunner()
     
     try:
-        # Run for 7 days of experiments
-        final_score = runner.run_autonomous_loop(num_days=7)
+        # Run for 7 days of experiments (will auto-resume if disconnected)
+        final_score = runner.run_autonomous_loop(num_days=7, resume=True)
         
         print(f"""
 ╔══════════════════════════════════════════════════════════════╗
@@ -407,4 +493,5 @@ if __name__ == "__main__":
         
     except KeyboardInterrupt:
         print("\n\n⚠️ Interrupted by user")
-        print("AutoResearch paused. Resume by running again.")
+        print("💾 State has been saved to checkpoint.")
+        print("Resume by running again: python autonomous_runner.py")
